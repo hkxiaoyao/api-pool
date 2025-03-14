@@ -3419,6 +3419,17 @@ const dashboardHtml = `
           <i class="bi bi-key me-2"></i>令牌管理
         </h2>
         <div class="d-flex align-items-center">
+          <div class="btn-group me-2">
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="filterAll">
+              <i class="bi bi-list me-1"></i>全部
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="filterEnabled">
+              <i class="bi bi-check-circle me-1"></i>启用
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="filterDisabled">
+              <i class="bi bi-slash-circle me-1"></i>禁用
+            </button>
+          </div>
           <span class="refresh-btn kv-refresh" id="refreshTokens" title="从KV刷新令牌数据（忽略缓存）">
             <i class="bi bi-arrow-clockwise"></i>
           </span>
@@ -3506,11 +3517,17 @@ const dashboardHtml = `
       let tokens = [];
       let selectedTokens = new Set();
       let statsRefreshInterval;
+      let currentFilter = 'all'; // 添加过滤状态变量
       
       // DOM元素
       const tokenTableBody = document.getElementById('tokenTableBody');
       const tokenCount = document.getElementById('tokenCount');
       const emptyTokenMessage = document.getElementById('emptyTokenMessage');
+      
+      // 过滤按钮
+      const filterAllBtn = document.getElementById('filterAll');
+      const filterEnabledBtn = document.getElementById('filterEnabled');
+      const filterDisabledBtn = document.getElementById('filterDisabled');
       
       // 批量操作按钮
       const enableSelectedBtn = document.getElementById('enableSelectedBtn');
@@ -3532,6 +3549,44 @@ const dashboardHtml = `
       
       // 每60秒刷新一次统计数据
       statsRefreshInterval = setInterval(refreshStats, 60000);
+      
+      // 过滤按钮点击事件
+      filterAllBtn.addEventListener('click', function() {
+        currentFilter = 'all';
+        updateFilterButtons();
+        filterTokenTable(document.getElementById('tokenSearch').value);
+      });
+      
+      filterEnabledBtn.addEventListener('click', function() {
+        currentFilter = 'enabled';
+        updateFilterButtons();
+        filterTokenTable(document.getElementById('tokenSearch').value);
+      });
+      
+      filterDisabledBtn.addEventListener('click', function() {
+        currentFilter = 'disabled';
+        updateFilterButtons();
+        filterTokenTable(document.getElementById('tokenSearch').value);
+      });
+      
+      // 更新过滤按钮状态
+      function updateFilterButtons() {
+        filterAllBtn.classList.remove('active');
+        filterEnabledBtn.classList.remove('active');
+        filterDisabledBtn.classList.remove('active');
+        
+        switch(currentFilter) {
+          case 'all':
+            filterAllBtn.classList.add('active');
+            break;
+          case 'enabled':
+            filterEnabledBtn.classList.add('active');
+            break;
+          case 'disabled':
+            filterDisabledBtn.classList.add('active');
+            break;
+        }
+      }
       
       // 添加令牌表单提交
       document.getElementById('addTokenForm').addEventListener('submit', async function(e) {
@@ -3769,10 +3824,11 @@ const dashboardHtml = `
             '</td>' +
             '<td>' + (index + 1) + '</td>' +
             '<td>' +
-              '<span class="text-truncate-custom" title="' + token.key + '">' + token.key + '</span>' +
+              '<span class="text-truncate-custom" title="' + token.originalKey + '">' + token.key + '</span>' +
               '<span class="copy-btn" data-token="' + index + '" title="复制令牌">' +
                 '<i class="bi bi-clipboard"></i>' +
               '</span>' +
+              '<input type="hidden" class="token-full-key" value="' + token.originalKey + '">' +
             '</td>' +
             '<td>' +
               '<span class="badge ' + (token.enabled ? 'badge-enabled' : 'badge-disabled') + '">' +
@@ -4206,19 +4262,42 @@ const dashboardHtml = `
       function filterTokenTable(searchText) {
         const rows = tokenTableBody.querySelectorAll('tr');
         const searchLower = searchText.toLowerCase();
+        let visibleCount = 0;
         
         rows.forEach(function(row) {
           const tokenCell = row.querySelector('td:nth-child(3)');
-          if (!tokenCell) return;
+          const statusCell = row.querySelector('td:nth-child(4)');
+          const fullKeyInput = row.querySelector('.token-full-key');
           
-          const tokenText = tokenCell.textContent.toLowerCase();
+          if (!tokenCell || !statusCell || !fullKeyInput) return;
           
-          if (searchText === '' || tokenText.includes(searchLower)) {
+          const fullKeyText = fullKeyInput.value.toLowerCase();
+          const statusText = statusCell.textContent.trim();
+          
+          // 检查搜索文本和状态过滤
+          const matchesSearch = searchText === '' || fullKeyText.includes(searchLower);
+          const matchesFilter = currentFilter === 'all' || 
+                             (currentFilter === 'enabled' && statusText === '启用') ||
+                             (currentFilter === 'disabled' && statusText === '禁用');
+          
+          if (matchesSearch && matchesFilter) {
             row.style.display = '';
+            visibleCount++;
           } else {
             row.style.display = 'none';
           }
         });
+        
+        // 更新令牌计数
+        tokenCount.textContent = visibleCount + " 个令牌";
+        
+        // 显示/隐藏空消息
+        if (visibleCount === 0) {
+          emptyTokenMessage.classList.remove('d-none');
+          emptyTokenMessage.textContent = searchText ? "没有找到匹配的令牌" : "暂无令牌，请添加新令牌";
+        } else {
+          emptyTokenMessage.classList.add('d-none');
+        }
       }
       
       // 更新批量操作按钮状态
