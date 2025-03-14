@@ -118,6 +118,11 @@ function acquireDataLock(operationId = null) {
 }
 
 function releaseDataLock(force = false, lockId = null) {
+  // 如果锁已经是释放状态，直接返回成功
+  if (!dataLock.locked) {
+    return true;
+  }
+  
   // 只有锁的拥有者或强制释放才能解锁
   if (force || !lockId || dataLock.owner === lockId) {
     dataLock.locked = false;
