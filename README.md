@@ -14,7 +14,8 @@ API 池管理系统是一个专为管理 OpenAI 格式 API 密钥设计的应用
 
 ### 2. 令牌管理
 
-- 在 KV 存储中保存和管理 API 密钥
+- 支持两种存储方式：KV 存储或 D1 数据库
+- 在 KV 存储或 D1 数据库中保存和管理 API 密钥
 - 支持批量添加、删除、启用、禁用 API 密钥
 - 识别多行/换行和逗号区分的多令牌格式
 - 自动检测令牌余额和状态
@@ -49,18 +50,30 @@ API 池管理系统是一个专为管理 OpenAI 格式 API 密钥设计的应用
 ## 技术架构
 
 - 使用 Cloudflare Workers 运行
-- 利用 KV 存储保存令牌和统计数据
-- 无需数据库，全内存运行提高性能
+- 支持两种存储方式：
+  - KV 存储：适合小规模部署，存储容量有限
+  - D1 数据库：适合大规模部署，存储容量更大
+- 无需外部数据库，全内存运行提高性能
 - 定期任务自动清理过期数据和恢复令牌
 
 ## 部署教程
 
 ### 方式一：手动部署
 
+#### 使用 KV 存储（适合小规模部署）
+
 1. 创建 Cloudflare 账号（如果没有）
 2. 复制 apipool.js 到 worker 中粘贴
 3. 创建 KV 命名空间 ：API_TOKENS
 4. worker 绑定 KV 即可
+
+#### 使用 D1 数据库（适合大规模部署）
+
+1. 创建 Cloudflare 账号（如果没有）
+2. 复制 api-d1.js 到 worker 中粘贴
+3. 创建 D1 数据库
+4. worker 绑定 D1 数据库，绑定名称为： DB
+5. 确保 STORAGE_TYPE 常量设置为 "d1"
 
 ### 方式二：通过 Wrangler CLI 部署
 
@@ -85,16 +98,26 @@ cd api-pool-system
 
 4. 创建必要的文件：
 
-   - `apipool.js`：复制主程序代码
+   - `apipool.js` 或 `api-d1.js`：复制主程序代码
    - `wrangler.toml`：创建配置文件
 
-5. 创建 KV 命名空间并获取 ID
+5. 根据您选择的存储方式，执行以下操作：
+
+#### 使用 KV 存储
 
 ```bash
 wrangler kv:namespace create "API_TOKENS"
 ```
 
-6. 更新 `wrangler.toml` 文件，填入 KV 命名空间 ID：
+#### 使用 D1 数据库
+
+```bash
+wrangler d1 create api-pool-db
+```
+
+6. 更新 `wrangler.toml` 文件，根据您选择的存储方式填入相应配置：
+
+#### 使用 KV 存储的配置
 
 ```toml
 name = "api-pool-system"
@@ -106,6 +129,21 @@ workers_dev = true
 [[kv_namespaces]]
 binding = "API_TOKENS"
 id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"   # 替换为上面命令输出的 id
+```
+
+#### 使用 D1 数据库的配置
+
+```toml
+name = "api-pool-system"
+main = "api-d1.js"
+compatibility_date = "2024-01-01"
+
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "api-pool-db"
+database_id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"   # 替换为上面命令输出的 id
 ```
 
 7. 部署到 Cloudflare Workers
@@ -124,8 +162,14 @@ wrangler deploy
    ```
 
 2. 设置管理员密码（务必修改默认密码）
+
    ```javascript
    const DEFAULT_ADMIN_PASSWORD = "xxx"; // 改为您的安全密码
+   ```
+
+3. 如果使用 D1 数据库，确保设置存储类型
+   ```javascript
+   const STORAGE_TYPE = "d1"; // 使用 D1 数据库
    ```
 
 ### 使用方法
@@ -166,7 +210,21 @@ const response = await fetch("https://your-worker-url.workers.dev/v1/chat/comple
 });
 ```
 
-> **重要提示**：必须使用在代码中设置的 API 密钥进行身份验证，否则 API 请求将被拒绝。默认密钥为`sk-yourCustomApiKey123456789`，建议您修改为自己的安全密钥。修改位置在`apipool.js`文件顶部的常量定义区域。
+> **重要提示**：必须使用在代码中设置的 API 密钥进行身份验证，否则 API 请求将被拒绝。默认密钥为`sk-yourCustomApiKey123456789`，建议您修改为自己的安全密钥。修改位置在代码文件顶部的常量定义区域。
+
+## 存储方式选择指南
+
+### KV 存储 (apipool.js)
+
+- **优点**：设置简单，适合小规模部署
+- **缺点**：存储容量有限，可能会遇到配额限制
+- **适用场景**：API 密钥数量较少
+
+### D1 数据库 (api-d1.js)
+
+- **优点**：存储容量更大，性能更好，适合大规模部署
+- **缺点**：设置稍复杂，需要创建数据库
+- **适用场景**：需要管理大量 API 密钥
 
 ## 使用提示
 
@@ -183,14 +241,16 @@ const response = await fetch("https://your-worker-url.workers.dev/v1/chat/comple
 
 3. **自定义**：
    - 可以修改代码中的`MAX_CONSECUTIVE_ERRORS`调整自动禁用的连续错误阈值
-   - 调整`KV_SAVE_INTERVAL`和`MAX_PENDING_UPDATES`优化 KV 存储写入频率
+   - 调整`KV_SAVE_INTERVAL`和`MAX_PENDING_UPDATES`优化存储写入频率
    - 修改`API_KEY`常量来自定义 API 鉴权密钥
+   - 修改`STORAGE_TYPE`常量选择存储方式（"kv" 或 "d1"）
 
 ## 故障排除
 
 1. **令牌不可用**：检查是否所有令牌都被禁用或余额不足
 2. **请求失败**：查看管理面板中的错误统计，识别问题令牌
 3. **响应缓慢**：可能是目标 API 服务器响应慢，或者令牌超出速率限制
+4. **D1 数据库问题**：确保正确绑定了 D1 数据库，绑定名称为 DB
 
 ## 高级配置
 
@@ -217,6 +277,15 @@ const API_ENDPOINTS = {
 ```javascript
 let logLevel = "info"; // 可选值: debug, info, warn, error
 ```
+
+### D1 数据库优化
+
+api-d1.js 版本包含以下优化：
+
+- 自动从 KV 迁移数据到 D1
+- 定期清理旧记录，只保留最新的数据
+- 使用 UPSERT 语法避免重复插入
+- 在 D1 操作失败时自动回退到 KV 存储
 
 ## 安全建议
 
